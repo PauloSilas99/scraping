@@ -335,54 +335,42 @@ def load_all_products(driver, wait, max_clicks=100):
         try:
             print(f"\n🔄 Tentativa {clicks_count + 1}: Procurando botão 'Ver mais produtos'...")
             
-            # Procurar pelo botão "Ver mais produtos"
-            button_selectors = [
-                'button[data-flora-text="ver-mais-produtos"]',
-                'button[data-flora="button"]:contains("Ver mais produtos")',
-                '//button[contains(text(), "Ver mais produtos")]',
-                '//button[@data-flora-text="ver-mais-produtos"]'
-            ]
+            # Contar produtos atuais usando o seletor correto dos cards
+            current_products = driver.find_elements(By.CSS_SELECTOR, 'div[data-flora="card"]')
+            current_count = len(current_products)
+            print(f"📊 Produtos atuais na página: {current_count}")
             
+            # Procurar pelo botão "Ver mais produtos" - pode ser um <p> dentro de um botão
             load_more_button = None
-            for selector in button_selectors:
+            try:
+                # Primeiro tentar encontrar o <p> com o texto
+                p_element = driver.find_element(By.XPATH, '//p[contains(text(), "Ver mais produtos")]')
+                # Tentar encontrar o botão pai
                 try:
-                    if ':contains' in selector or selector.startswith('//'):
-                        load_more_button = driver.find_element(By.XPATH, '//button[contains(text(), "Ver mais produtos")]')
-                    else:
-                        load_more_button = driver.find_element(By.CSS_SELECTOR, selector)
-                    
-                    if load_more_button and load_more_button.is_displayed() and load_more_button.is_enabled():
-                        break
-                    else:
-                        load_more_button = None
+                    load_more_button = p_element.find_element(By.XPATH, './ancestor::button')
                 except:
-                    continue
+                    # Se não encontrar botão pai, tentar clicar no próprio <p>
+                    load_more_button = p_element
+                print("✅ Botão 'Ver mais produtos' encontrado via <p>")
+            except:
+                # Tentar encontrar diretamente um botão
+                try:
+                    load_more_button = driver.find_element(By.XPATH, '//button[.//p[contains(text(), "Ver mais produtos")]]')
+                    print("✅ Botão 'Ver mais produtos' encontrado via botão")
+                except:
+                    try:
+                        load_more_button = driver.find_element(By.XPATH, '//button[contains(text(), "Ver mais produtos")]')
+                        print("✅ Botão 'Ver mais produtos' encontrado via texto do botão")
+                    except:
+                        pass
             
             if not load_more_button:
                 print("✅ Não há mais botão 'Ver mais produtos' disponível")
                 break
             
-            # Contar produtos atuais (precisa identificar seletor correto)
-            # Vamos tentar encontrar produtos primeiro
-            product_selectors = [
-                '[class*="product"]',
-                '[class*="card"]',
-                '[class*="item"]',
-                'article',
-                '[data-testid*="product"]'
-            ]
-            
-            current_products = []
-            for selector in product_selectors:
-                try:
-                    elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                    if len(elements) > 0:
-                        current_products = elements
-                        break
-                except:
-                    continue
-            
-            current_count = len(current_products)
+            if not (load_more_button.is_displayed() and (not hasattr(load_more_button, 'is_enabled') or load_more_button.is_enabled())):
+                print("⚠️ Botão encontrado mas não está disponível")
+                break
             
             if current_count == previous_count and clicks_count > 0:
                 print("⚠️ Nenhum produto novo foi carregado. Parando...")
@@ -408,19 +396,10 @@ def load_all_products(driver, wait, max_clicks=100):
                     break
             
             # Aguardar novos produtos carregarem
-            time.sleep(3)
+            time.sleep(4)
             
             # Verificar se novos produtos foram carregados
-            new_products = []
-            for selector in product_selectors:
-                try:
-                    elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                    if len(elements) > 0:
-                        new_products = elements
-                        break
-                except:
-                    continue
-            
+            new_products = driver.find_elements(By.CSS_SELECTOR, 'div[data-flora="card"]')
             new_count = len(new_products)
             
             if new_count > current_count:
@@ -430,16 +409,7 @@ def load_all_products(driver, wait, max_clicks=100):
                 print("⏳ Aguardando produtos carregarem...")
                 time.sleep(2)
                 # Verificar novamente
-                final_products = []
-                for selector in product_selectors:
-                    try:
-                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                        if len(elements) > 0:
-                            final_products = elements
-                            break
-                    except:
-                        continue
-                
+                final_products = driver.find_elements(By.CSS_SELECTOR, 'div[data-flora="card"]')
                 final_count = len(final_products)
                 if final_count == current_count:
                     print("✅ Todos os produtos já foram carregados")
@@ -452,8 +422,9 @@ def load_all_products(driver, wait, max_clicks=100):
             print(f"⚠️ Erro ao carregar mais produtos: {e}")
             break
     
-    final_count = len(driver.find_elements(By.CSS_SELECTOR, '[class*="product"], [class*="card"], article'))
+    final_count = len(driver.find_elements(By.CSS_SELECTOR, 'div[data-flora="card"]'))
     print(f"\n📊 Total de cliques realizados: {clicks_count}")
+    print(f"📊 Total de produtos carregados: {final_count}")
     return clicks_count
 
 def extract_products(driver, wait):
@@ -467,79 +438,23 @@ def extract_products(driver, wait):
         print("\n📦 Iniciando extração de dados dos produtos...")
         time.sleep(3)
         
-        # Obter HTML da página para análise mais detalhada
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, 'html.parser')
+        # Procurar produtos usando o seletor correto dos cards
+        product_elements = driver.find_elements(By.CSS_SELECTOR, 'div[data-flora="card"]')
         
-        # Procurar produtos na página usando múltiplos seletores
-        product_selectors = [
-            '[class*="product"]',
-            '[class*="card"]',
-            '[class*="item"]',
-            'article',
-            '[data-testid*="product"]',
-            '[class*="grid"] > *',
-            '[class*="product-card"]',
-            '[class*="product-item"]',
-            '[class*="showcase"]',
-            'div[class*="col"]',
-            'div[class*="product"]'
-        ]
-        
-        product_elements = []
-        max_elements = 0
-        best_selector = None
-        
-        # Testar todos os seletores e escolher o que retorna mais elementos únicos
-        for selector in product_selectors:
+        if not product_elements:
+            print("⚠️ Nenhum produto encontrado. Tentando busca alternativa...")
+            # Tentar buscar por classe alternativa
             try:
-                elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                # Filtrar elementos que parecem ser produtos (têm links, imagens, ou texto)
-                filtered = []
-                for elem in elements:
-                    try:
-                        # Verificar se tem características de produto
-                        has_link = len(elem.find_elements(By.TAG_NAME, 'a')) > 0
-                        has_img = len(elem.find_elements(By.TAG_NAME, 'img')) > 0
-                        has_text = len(elem.text.strip()) > 10
-                        
-                        if has_link or (has_img and has_text):
-                            filtered.append(elem)
-                    except:
-                        continue
-                
-                if len(filtered) > max_elements:
-                    max_elements = len(filtered)
-                    product_elements = filtered
-                    best_selector = selector
-            except:
-                continue
-        
-        if product_elements:
-            print(f"✅ Encontrados {len(product_elements)} elementos com seletor: {best_selector}")
-        else:
-            print("⚠️ Nenhum produto encontrado com seletores padrão. Tentando busca alternativa...")
-            # Buscar por links que podem ser de produtos
-            try:
-                all_links = driver.find_elements(By.TAG_NAME, 'a')
-                product_elements = []
-                for link in all_links:
-                    try:
-                        href = link.get_attribute('href')
-                        if href and ('/produto' in href.lower() or '/product' in href.lower() or 'produto' in href.lower()):
-                            parent = link.find_element(By.XPATH, './..')
-                            if parent not in product_elements:
-                                product_elements.append(parent)
-                    except:
-                        continue
-                
+                product_elements = driver.find_elements(By.CSS_SELECTOR, 'div.flora--c-jAOGHF')
                 if product_elements:
-                    print(f"✅ Encontrados {len(product_elements)} produtos via links")
-                else:
-                    raise Exception("Nenhum produto encontrado")
+                    print(f"✅ Encontrados {len(product_elements)} produtos via classe alternativa")
             except:
+                pass
+            
+            if not product_elements:
                 print("❌ Não foi possível identificar produtos na página")
                 # Salvar HTML para análise manual
+                page_source = driver.page_source
                 debug_file = 'produtos_revendedores/pagina_debug.html'
                 os.makedirs('produtos_revendedores', exist_ok=True)
                 with open(debug_file, 'w', encoding='utf-8') as f:
@@ -547,10 +462,13 @@ def extract_products(driver, wait):
                 print(f"💾 HTML da página salvo em {debug_file} para análise")
                 return []
         
+        print(f"✅ Encontrados {len(product_elements)} cards de produtos")
+        
         print(f"🛍️ Total de produtos encontrados: {len(product_elements)}")
         
         products_data = []
         seen_links = set()
+        seen_skus = set()
         seen_names = set()
         
         for i, element in enumerate(product_elements):
@@ -567,21 +485,29 @@ def extract_products(driver, wait):
                 
                 if product_data:
                     product_link = product_data.get('link', '')
+                    product_sku = product_data.get('sku', '')
                     product_name = product_data.get('nome', '').strip()
                     
-                    # Evitar duplicados por link ou nome
+                    # Evitar duplicados por SKU (mais confiável), link ou nome
                     is_duplicate = False
-                    if product_link and product_link in seen_links:
+                    if product_sku and product_sku in seen_skus:
+                        is_duplicate = True
+                    elif product_link and product_link in seen_links:
                         is_duplicate = True
                     elif product_name and product_name in seen_names and product_name != "Nome não encontrado":
                         is_duplicate = True
                     
                     if not is_duplicate:
                         products_data.append(product_data)
+                        if product_sku:
+                            seen_skus.add(product_sku)
                         if product_link:
                             seen_links.add(product_link)
                         if product_name:
                             seen_names.add(product_name)
+                    else:
+                        if (i + 1) % 50 == 0:
+                            print(f"⏭️ Produto duplicado ignorado (SKU: {product_sku or 'N/A'})")
                         
             except Exception as e:
                 print(f"❌ Erro ao processar produto {i+1}: {e}")
@@ -598,7 +524,20 @@ def extract_products(driver, wait):
 
 def extract_product_data(product_element, driver):
     """
-    Extrai dados de um produto individual
+    Extrai dados de um produto individual do card
+    
+    Estrutura esperada do card:
+    - div[data-flora="card"] contendo:
+      - Link do produto (a tag com href)
+      - SKU (código do produto em uma tag)
+      - Imagem do produto
+      - Nome do produto
+      - Preço "Pague": R$ 118,52
+      - Preço "Revenda": R$ 139,44
+      - Preço "Lucre": R$ 20,92
+      - Desconto: -15%
+      - Preço original: R$ 164,90
+      - Tag de promoção
     
     Returns:
         dict: Dicionário com dados do produto ou None
@@ -606,166 +545,125 @@ def extract_product_data(product_element, driver):
     try:
         product_data = {}
         
-        # Tentar extrair link (procurar em 'a' tags dentro do elemento)
+        # 1. Extrair link do produto
         try:
-            link_elements = product_element.find_elements(By.TAG_NAME, 'a')
-            for link_elem in link_elements:
-                href = link_elem.get_attribute('href')
-                if href and ('produto' in href.lower() or 'product' in href.lower() or href.startswith('http')):
+            link_element = product_element.find_element(By.CSS_SELECTOR, 'a[href*="/produto"]')
+            href = link_element.get_attribute('href')
+            if href:
+                # Completar URL se for relativa
+                if href.startswith('/'):
+                    product_data['link'] = f"https://revendedores.grupoboticario.com.br{href}"
+                else:
                     product_data['link'] = href
-                    break
+            else:
+                product_data['link'] = None
         except:
-            pass
-        
-        if 'link' not in product_data:
             product_data['link'] = None
         
-        # Tentar extrair nome (títulos, spans com nome, etc)
-        nome_selectors = [
-            'h1', 'h2', 'h3', 'h4', 'h5',
-            '[class*="name"]', '[class*="title"]', '[class*="product-name"]',
-            '[class*="nome"]', '[class*="titulo"]',
-            'p[class*="name"]', 'span[class*="name"]',
-            '[data-testid*="name"]', '[data-testid*="title"]'
-        ]
-        
-        for selector in nome_selectors:
-            try:
-                nome_elements = product_element.find_elements(By.CSS_SELECTOR, selector)
-                for nome_elem in nome_elements:
-                    nome_text = nome_elem.text.strip()
-                    if nome_text and len(nome_text) > 3:  # Ignorar textos muito curtos
-                        product_data['nome'] = nome_text
-                        break
-                if 'nome' in product_data:
-                    break
-            except:
-                continue
-        
-        if 'nome' not in product_data:
-            # Tentar extrair nome do texto do link
-            try:
-                link_elem = product_element.find_element(By.TAG_NAME, 'a')
-                alt_text = link_elem.get_attribute('aria-label') or link_elem.text.strip()
-                if alt_text and len(alt_text) > 3:
-                    product_data['nome'] = alt_text
-            except:
-                pass
-        
-        if 'nome' not in product_data:
-            product_data['nome'] = "Nome não encontrado"
-        
-        # Tentar extrair preço atual
-        preco_selectors = [
-            '[class*="price"]', '[class*="preco"]', '[class*="valor"]',
-            '[class*="current-price"]', '[class*="preco-atual"]',
-            '[class*="price-current"]', '[data-testid*="price"]'
-        ]
-        
-        for selector in preco_selectors:
-            try:
-                preco_elements = product_element.find_elements(By.CSS_SELECTOR, selector)
-                for preco_elem in preco_elements:
-                    preco_text = preco_elem.text.strip()
-                    if preco_text and ('R$' in preco_text or 'reais' in preco_text.lower()):
-                        product_data['preco'] = preco_text
-                        break
-                if 'preco' in product_data:
-                    break
-            except:
-                continue
-        
-        if 'preco' not in product_data:
-            product_data['preco'] = None
-        
-        # Tentar extrair preço original (se houver desconto)
-        preco_original_selectors = [
-            '[class*="original"]', '[class*="old"]', '[class*="before"]',
-            '[class*="preco-original"]', '[class*="old-price"]',
-            '[class*="price-before"]', '[data-testid*="old-price"]'
-        ]
-        
-        for selector in preco_original_selectors:
-            try:
-                preco_original = product_element.find_element(By.CSS_SELECTOR, selector)
-                if preco_original.text.strip():
-                    product_data['preco_original'] = preco_original.text.strip()
-                    break
-            except:
-                continue
-        
-        if 'preco_original' not in product_data:
-            product_data['preco_original'] = None
-        
-        # Tentar extrair desconto
-        desconto_selectors = [
-            '[class*="discount"]', '[class*="desconto"]', '[class*="off"]',
-            '[class*="badge"]', '[class*="tag"]', '[class*="promo"]'
-        ]
-        
-        for selector in desconto_selectors:
-            try:
-                desconto_elements = product_element.find_elements(By.CSS_SELECTOR, selector)
-                for desconto_elem in desconto_elements:
-                    desconto_text = desconto_elem.text.strip()
-                    if desconto_text and ('%' in desconto_text or 'off' in desconto_text.lower() or 'desconto' in desconto_text.lower()):
-                        product_data['desconto'] = desconto_text
-                        break
-                if 'desconto' in product_data:
-                    break
-            except:
-                continue
-        
-        if 'desconto' not in product_data:
-            product_data['desconto'] = None
-        
-        # Tentar extrair imagem
+        # 2. Extrair SKU (código do produto) - está em uma tag com data-custom="true"
         try:
-            img_elements = product_element.find_elements(By.TAG_NAME, 'img')
-            for img_elem in img_elements:
-                src = img_elem.get_attribute('src') or img_elem.get_attribute('data-src')
-                if src and ('http' in src or 'data:image' in src):
-                    product_data['imagem'] = src
-                    break
+            sku_element = product_element.find_element(By.CSS_SELECTOR, 'span[data-custom="true"] p')
+            sku_text = sku_element.text.strip()
+            if sku_text and sku_text.isdigit():
+                product_data['sku'] = sku_text
+            else:
+                product_data['sku'] = None
         except:
-            pass
+            product_data['sku'] = None
         
-        if 'imagem' not in product_data:
+        # 3. Extrair nome do produto - está em um <p> dentro de div.flora--c-ieqJkR
+        try:
+            nome_element = product_element.find_element(By.CSS_SELECTOR, 'div.flora--c-ieqJkR p')
+            product_data['nome'] = nome_element.text.strip()
+        except:
+            try:
+                # Tentar alternativa
+                nome_element = product_element.find_element(By.CSS_SELECTOR, 'a[href*="/produto"] img')
+                product_data['nome'] = nome_element.get_attribute('alt') or "Nome não encontrado"
+            except:
+                product_data['nome'] = "Nome não encontrado"
+        
+        # 4. Extrair imagem
+        try:
+            img_element = product_element.find_element(By.CSS_SELECTOR, 'img')
+            # Tentar src primeiro, depois srcset
+            src = img_element.get_attribute('src')
+            if not src or 'data:image' in src:
+                # Extrair do srcset
+                srcset = img_element.get_attribute('srcset')
+                if srcset:
+                    # Pegar a primeira URL do srcset
+                    src = srcset.split(',')[0].strip().split(' ')[0]
+            product_data['imagem'] = src if src else None
+        except:
             product_data['imagem'] = None
         
-        # Tentar extrair descrição
-        desc_selectors = [
-            '[class*="description"]', '[class*="desc"]', '[class*="summary"]',
-            'p', '[class*="text"]'
-        ]
-        
-        for selector in desc_selectors:
-            try:
-                desc_elements = product_element.find_elements(By.CSS_SELECTOR, selector)
-                for desc_elem in desc_elements:
-                    desc_text = desc_elem.text.strip()
-                    if desc_text and len(desc_text) > 10 and desc_text != product_data.get('nome', ''):
-                        product_data['descricao'] = desc_text[:200]  # Limitar tamanho
-                        break
-                if 'descricao' in product_data:
-                    break
-            except:
-                continue
-        
-        if 'descricao' not in product_data:
-            product_data['descricao'] = None
-        
-        # Extrair texto completo para análise posterior (limitado)
+        # 5. Extrair preço "Pague" - está em um <p> dentro de div com data-pague="true"
         try:
-            full_text = product_element.text.strip()
-            product_data['texto_completo'] = full_text[:300] if len(full_text) > 300 else full_text
+            pague_element = product_element.find_element(By.CSS_SELECTOR, 'div[data-pague="true"] p.flora--c-PJLV-gvAhgR')
+            preco_pague = pague_element.text.strip()
+            product_data['preco_pague'] = preco_pague if preco_pague else None
         except:
-            product_data['texto_completo'] = None
+            product_data['preco_pague'] = None
+        
+        # 6. Extrair preço "Revenda"
+        try:
+            # Procurar pelo texto "Revenda" e pegar o próximo <p> com preço
+            revenda_section = product_element.find_element(By.XPATH, './/p[contains(text(), "Revenda")]/following-sibling::p[1]')
+            preco_revenda = revenda_section.text.strip()
+            product_data['preco_revenda'] = preco_revenda if preco_revenda else None
+        except:
+            product_data['preco_revenda'] = None
+        
+        # 7. Extrair preço "Lucre"
+        try:
+            lucre_section = product_element.find_element(By.XPATH, './/p[contains(text(), "Lucre")]/following-sibling::p[1]')
+            preco_lucre = lucre_section.text.strip()
+            product_data['preco_lucre'] = preco_lucre if preco_lucre else None
+        except:
+            product_data['preco_lucre'] = None
+        
+        # 8. Extrair desconto - está em um <p> com data-testid="discount"
+        try:
+            desconto_element = product_element.find_element(By.CSS_SELECTOR, 'p[data-testid="discount"]')
+            product_data['desconto'] = desconto_element.text.strip()
+        except:
+            product_data['desconto'] = None
+        
+        # 9. Extrair preço original (antes do desconto) - está em um <p> antes do preço com desconto
+        try:
+            # Procurar pelo preço que está antes do desconto
+            preco_original_element = product_element.find_element(By.CSS_SELECTOR, 'div[data-pague="true"] p.flora--c-PJLV-gxwRVS')
+            preco_original = preco_original_element.text.strip()
+            product_data['preco_original'] = preco_original if preco_original else None
+        except:
+            product_data['preco_original'] = None
+        
+        # 10. Extrair tag de promoção - está em um span com data-custom="promotion"
+        try:
+            promo_element = product_element.find_element(By.CSS_SELECTOR, 'span[data-custom="promotion"] p span')
+            product_data['tag_promocao'] = promo_element.get_attribute('aria-label') or promo_element.text.strip()
+        except:
+            try:
+                # Tentar alternativa
+                promo_element = product_element.find_element(By.CSS_SELECTOR, 'span[data-custom="promotion"]')
+                product_data['tag_promocao'] = promo_element.text.strip() if promo_element.text.strip() else None
+            except:
+                product_data['tag_promocao'] = None
+        
+        # 11. Verificar disponibilidade
+        try:
+            available = product_element.find_element(By.CSS_SELECTOR, 'div[data-available="true"]')
+            product_data['disponivel'] = True
+        except:
+            product_data['disponivel'] = False
         
         return product_data
         
     except Exception as e:
         print(f"⚠️ Erro ao extrair dados do produto: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def save_data(cycle_info, products_data, base_dir='produtos_revendedores'):
