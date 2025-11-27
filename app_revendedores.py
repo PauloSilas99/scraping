@@ -666,10 +666,138 @@ def extract_product_data(product_element, driver):
         traceback.print_exc()
         return None
 
+def format_cycle_info(cycle_info):
+    """
+    Formata as informações do ciclo para o padrão do JSON
+    
+    Args:
+        cycle_info: Dicionário com informações do ciclo extraídas
+    
+    Returns:
+        dict: Dicionário formatado com estrutura ciclo_info
+    """
+    if not cycle_info:
+        return None
+    
+    # Converter datas de DD/MM para YYYY-MM-DD
+    def convert_date(date_str):
+        if not date_str:
+            return None
+        try:
+            # Formato: "03/11" -> "2025-11-03" (assumindo ano atual)
+            parts = date_str.split('/')
+            if len(parts) == 2:
+                day, month = parts
+                year = datetime.now().year
+                return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        except:
+            pass
+        return None
+    
+    numero_ciclo = cycle_info.get('numero_ciclo', '')
+    data_inicio_str = cycle_info.get('data_inicio', '')
+    data_fim_str = cycle_info.get('data_fim', '')
+    
+    # Criar formato do ciclo: "16/2025" ou similar
+    ano_atual = datetime.now().year
+    ciclo_numero_formatado = f"{numero_ciclo.zfill(2)}/{ano_atual}" if numero_ciclo else f"01/{ano_atual}"
+    
+    # Criar nome do ciclo baseado no período
+    nome_ciclo = f"Ciclo {numero_ciclo} {ano_atual}" if numero_ciclo else f"Ciclo {ano_atual}"
+    
+    formatted = {
+        "numero": ciclo_numero_formatado,
+        "nome": nome_ciclo,
+        "data_inicio": convert_date(data_inicio_str) or f"{ano_atual}-01-01",
+        "data_fim": convert_date(data_fim_str) or f"{ano_atual}-12-31"
+    }
+    
+    return formatted
+
+def format_product(product_data):
+    """
+    Formata um produto para o padrão do JSON
+    
+    Args:
+        product_data: Dicionário com dados do produto extraídos
+    
+    Returns:
+        dict: Dicionário formatado com estrutura do produto
+    """
+    # Extrair valores numéricos dos preços
+    def extract_price(price_str):
+        if not price_str:
+            return None
+        try:
+            # Limpar string: remover entidades HTML, espaços, etc
+            price_clean = price_str.replace('R$', '').replace('&nbsp;', '').replace(' ', '').strip()
+            # Se tiver quebra de linha, pegar apenas a primeira linha
+            if '\n' in price_clean:
+                price_clean = price_clean.split('\n')[0]
+            # Remover pontos de milhar e substituir vírgula por ponto
+            # Formato brasileiro: "164,90" ou "1.164,90"
+            import re
+            # Buscar padrão: números com vírgula (decimal)
+            match = re.search(r'(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)', price_clean)
+            if match:
+                price_str_clean = match.group(1).replace('.', '').replace(',', '.')
+                return float(price_str_clean)
+            # Tentar número simples
+            numbers = re.findall(r'\d+\.?\d*', price_clean.replace(',', '.'))
+            if numbers:
+                return float(numbers[0])
+        except Exception as e:
+            pass
+        return None
+    
+    def extract_discount_percent(discount_str):
+        if not discount_str:
+            return None
+        try:
+            # Remover "%" e outros caracteres
+            import re
+            numbers = re.findall(r'\d+\.?\d*', discount_str.replace('-', ''))
+            if numbers:
+                return float(numbers[0])
+        except:
+            pass
+        return None
+    
+    # Extrair código do produto (SKU ou do link)
+    codigo = product_data.get('sku')
+    if not codigo:
+        try:
+            link = product_data.get('link', '')
+            if link and '/produto/' in link:
+                codigo = link.split('/produto/')[-1].split('?')[0].split('/')[0]
+        except:
+            pass
+    
+    # Mapear campos conforme formato da imagem
+    formatted = {
+        "codigo": codigo,
+        "nome": product_data.get('nome', 'Nome não encontrado'),
+        "descricao": product_data.get('descricao') or product_data.get('tag_promocao'),
+        "preco_custo": extract_price(product_data.get('preco_revenda')),
+        "preco_sugerido": extract_price(product_data.get('preco_pague')),
+        "preco_tabela": extract_price(product_data.get('preco_original')),
+        "desconto_percentual": extract_discount_percent(product_data.get('desconto')),
+        "categoria": None,  # Não temos essa informação na extração atual
+        "subcategoria": None,  # Não temos essa informação na extração atual
+        "ean": None,  # Não temos essa informação na extração atual
+        "sku": product_data.get('sku') or codigo,
+        "disponivel": product_data.get('disponivel', True),
+        "pontos_venda": None,  # Não temos essa informação na extração atual
+        "url_imagem": product_data.get('imagem')
+    }
+    
+    return formatted
+
 def save_data(cycle_info, products_data, base_dir='produtos_revendedores'):
     """
     Salva as informações do ciclo e produtos em arquivos JSON
     
+    Formato conforme a imagem: cada arquivo contém marca_id, ciclo_info e produtos.
     O arquivo do ciclo é salvo PRIMEIRO no início da pasta (como solicitado).
     
     Args:
@@ -683,6 +811,9 @@ def save_data(cycle_info, products_data, base_dir='produtos_revendedores'):
             os.makedirs(base_dir)
             print(f"📁 Pasta '{base_dir}' criada")
         
+        # Formatar informações do ciclo
+        formatted_cycle_info = format_cycle_info(cycle_info)
+        
         # Salvar informações do ciclo PRIMEIRO (fundamental para controle de dados)
         if cycle_info:
             cycle_file = os.path.join(base_dir, 'ciclo_periodo.json')
@@ -692,24 +823,44 @@ def save_data(cycle_info, products_data, base_dir='produtos_revendedores'):
             print(f"   📅 Ciclo: {cycle_info.get('numero_ciclo', 'N/A')} | Período: {cycle_info.get('data_inicio', 'N/A')} a {cycle_info.get('data_fim', 'N/A')}")
         else:
             print("⚠️ Informações do ciclo não foram extraídas")
+            formatted_cycle_info = {
+                "numero": "01/2025",
+                "nome": "Ciclo 2025",
+                "data_inicio": f"{datetime.now().year}-01-01",
+                "data_fim": f"{datetime.now().year}-12-31"
+            }
         
-        # Salvar produtos
+        # Salvar produtos no formato da imagem
         if products_data:
             produtos_por_arquivo = 100
             total_produtos = len(products_data)
             arquivos_criados = []
             
+            # Marca ID (1 para Boticário)
+            marca_id = 1
+            
             for i in range(0, total_produtos, produtos_por_arquivo):
                 inicio = i + 1
                 fim = min(i + produtos_por_arquivo, total_produtos)
                 
+                # Obter lote de produtos
                 produtos_lote = products_data[i:fim]
+                
+                # Formatar produtos para o novo formato
+                produtos_formatados = [format_product(p) for p in produtos_lote]
+                
+                # Criar estrutura conforme a imagem
+                arquivo_json = {
+                    "marca_id": marca_id,
+                    "ciclo_info": formatted_cycle_info,
+                    "produtos": produtos_formatados
+                }
                 
                 nome_arquivo = f'produtos_{inicio:03d}_{fim:03d}.json'
                 caminho_arquivo = os.path.join(base_dir, nome_arquivo)
                 
                 with open(caminho_arquivo, 'w', encoding='utf-8') as f:
-                    json.dump(produtos_lote, f, ensure_ascii=False, indent=2)
+                    json.dump(arquivo_json, f, ensure_ascii=False, indent=2)
                 
                 arquivos_criados.append(caminho_arquivo)
                 print(f"💾 Arquivo criado: {caminho_arquivo} - {len(produtos_lote)} produtos")
@@ -729,11 +880,13 @@ def save_data(cycle_info, products_data, base_dir='produtos_revendedores'):
                 print("=" * 50)
                 for i, product in enumerate(products_data[:5], 1):
                     print(f"{i}. {product.get('nome', 'N/A')[:60]}...")
-                    print(f"   Preço: {product.get('preco', 'N/A')}")
+                    print(f"   SKU: {product.get('sku', 'N/A')} | Preço Pague: {product.get('preco_pague', 'N/A')}")
                     print("-" * 30)
         
     except Exception as e:
         print(f"❌ Erro ao salvar dados: {e}")
+        import traceback
+        traceback.print_exc()
 
 def scrape_revendedores():
     """Função principal para realizar scraping do portal de revendedores"""
